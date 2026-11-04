@@ -218,3 +218,18 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node / Frontend
+node_modules/
+.next/
+out/
+build/
+
+# Python / Backend
+venv/
+__pycache__/
+*.pyc
+*.sqlite3
+
+# Entorno y Secretos
+.env
