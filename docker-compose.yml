@@ -1,11 +1,10 @@
-version: '3.8'
-
+# docker-compose.yml
 services:
   db:
-    image: postgis/postgis:15-3.4
+    image: postgis/postgis:15-3.3
     environment:
       POSTGRES_USER: admin
-      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_PASSWORD: password # Usa la contraseña que tenías antes
       POSTGRES_DB: agridb
     ports:
       - "5432:5432"
@@ -22,13 +21,12 @@ services:
       - db
 
   frontend:
-    image: node:18-alpine
-    working_dir: /app
-    volumes:
-      - ./frontend:/app
+    build: ./frontend
     ports:
       - "3000:3000"
-    command: npm run dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # Esta es la línea que evita el error 127
     depends_on:
       - backend
 
