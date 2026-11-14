@@ -19,6 +19,7 @@ incertidumbre.
 (lat/lon) y el backend obtiene el clima de **NASA POWER**.
 
 ### Alcance MVP (lo que se presenta)
+
 1. Seleccionar ubicación en un mapa (o escribir coordenadas).
 2. Ver el resumen climático NASA de esa ubicación (temperatura, lluvia, humedad de suelo en raíz, por mes).
 3. Recibir 3 estrategias con puntaje 0–100 y explicación.
@@ -26,6 +27,7 @@ incertidumbre.
 5. App instalable (PWA) que muestra la interfaz y la última consulta sin internet.
 
 ### Fuera de alcance MVP (solo si sobra tiempo)
+
 - SMAP / GPM IMERG directos (requieren cuenta Earthdata y procesar rasters).
 - Modelo de Machine Learning entrenado. **No llamar "ML" a reglas**; los jueces lo notan.
 - Autenticación de usuarios.
@@ -90,7 +92,7 @@ Si NASA no responde y no hay caché → `503` con `{"detail": "NASA POWER no dis
 
 ## 4. Estructura de carpetas (oficial)
 
-> Nota: los issues mencionan `frontend/src/...`. **No usamos `src/`**: la ruta real es `frontend/app/`.
+> Nota: los issues mencionan `frontend/src/...`. **No usamos** `src/`: la ruta real es `frontend/app/`.
 
 ```
 NasaSpaceApp/
@@ -163,6 +165,7 @@ Base: `${NEXT_PUBLIC_API_URL}` (local: `http://localhost:8000`). Todo JSON. Docu
 | GET | `/api/v1/crops` | Catálogo de cultivos (para selects) | DBA + Backend |
 
 ### 5.1 `GET /api/v1/climate?lat=31.86&lon=-116.60`
+
 ```json
 {
   "lat": 31.86, "lon": -116.6,
@@ -179,12 +182,15 @@ Base: `${NEXT_PUBLIC_API_URL}` (local: `http://localhost:8000`). Todo JSON. Docu
   ]
 }
 ```
+
 - `humedad_suelo_raiz`: fracción 0–1 (`GWETROOT` de POWER).
 - `cv_lluvia_pct`: coeficiente de variación de la lluvia anual (desviación estándar / media) → base de la incertidumbre.
 - `mensual`: 12 elementos.
 
 ### 5.2 `POST /api/v1/recommend`
+
 Request:
+
 ```json
 {
   "lat": 31.86, "lon": -116.6,
@@ -195,13 +201,16 @@ Request:
   "prioridad": "conservar_agua"
 }
 ```
+
 Valores permitidos (enums):
+
 - `tipo_suelo`: `arcilloso | arenoso | limoso | franco`
 - `disponibilidad_agua`: `baja | media | alta`
 - `prioridad`: `conservar_agua | mejorar_suelo | ingresos_extra`
 - `lat` ∈ [-90, 90], `lon` ∈ [-180, 180] → si no, `422`.
 
 Response `200`:
+
 ```json
 {
   "consulta_id": 42,
@@ -224,10 +233,12 @@ Response `200`:
   ]
 }
 ```
+
 - Siempre 3 recomendaciones, en el orden `actual`, `optimizada`, `resiliente`.
 - `tradeoff` es una oración ya lista para mostrar (sin el prefijo "Tradeoff:").
 
 ### 5.3 `GET /api/v1/history`
+
 ```json
 [
   {
@@ -241,10 +252,12 @@ Response `200`:
 ```
 
 ### 5.4 Farms
+
 `POST /api/v1/farms` → `{ "nombre": "Parcela Norte", "lat": 31.86, "lon": -116.6, "tipo_suelo": "arcilloso", "area_ha": 3.5 }`
 Response: el mismo objeto con `id` y `creado_en`.
 
 ### 5.5 Errores
+
 | Código | Cuándo |
 |---|---|
 | 422 | Validación (Pydantic) |
@@ -313,6 +326,7 @@ erDiagram
 ```
 
 Reglas:
+
 - **Migraciones con Alembic** (no `create_all`). El contenedor backend corre `alembic upgrade head` antes de levantar uvicorn.
 - `clima_cache`: único en `(lat_grid, lon_grid, periodo)`. La malla de NASA POWER es de ~0.5°, así que redondear evita llamadas repetidas.
 - `cultivos` se llena con `app/db/seed.py` desde `app/data/cultivos.json` (idempotente: hace upsert por `nombre`).
@@ -330,6 +344,7 @@ Reglas transparentes y explicables (no ML).
 (`baja: 0`, `media: 300`, `alta: 800` mm; constantes en `core/config.py`, ajustables).
 
 **Puntaje por cultivo (0–1 cada uno):**
+
 | Factor | Cálculo | Peso |
 |---|---|---|
 | temperatura | 1 si `temp_media` ∈ [opt_min, opt_max]; baja linealmente a 0 en los límites absolutos | 0.40 |
@@ -340,6 +355,7 @@ Reglas transparentes y explicables (no ML).
 `puntaje = round(100 × Σ peso·factor)`. Si un factor es 0 → puntaje × 0.5 (cultivo inviable).
 
 **Las 3 estrategias:**
+
 1. `actual`: el cultivo actual evaluado con la misma fórmula (si no está en el catálogo, se avisa).
 2. `optimizada`: el de mayor puntaje que no sea el actual.
 3. `resiliente`: el de mayor puntaje entre `requerimiento_agua = baja` o `es_cobertura = true`, distinto de los anteriores.
@@ -362,6 +378,7 @@ Sin API key. Docs: https://power.larc.nasa.gov/docs/services/api/
 Parámetros comunes: `parameters=T2M,T2M_MAX,T2M_MIN,PRECTOTCORR,GWETROOT&community=AG&latitude=..&longitude=..&format=JSON`
 
 Notas:
+
 - Los valores van en `properties.parameter.<PARAM>`; las unidades, en `parameters.<PARAM>.units`. **Verificar unidades**: la precipitación viene en mm/día → multiplicar por los días del mes.
 - `-999` = sin dato → ignorar.
 - En el endpoint mensual, el "mes 13" (ej. `201513`) es el promedio anual.
@@ -375,7 +392,7 @@ Notas:
 - **Mapa:** react-leaflet con `dynamic(..., { ssr: false })` (Leaflet usa `window`). Un clic mueve el marcador y actualiza `lat/lon`.
 - **Cliente API único** (`lib/api.ts`): nadie hace `fetch` directo en los componentes. Base URL desde `process.env.NEXT_PUBLIC_API_URL`.
 - **Tipos** (`lib/types.ts`): espejo exacto de la sección 5.
-- **PWA:** `app/manifest.ts` nativo de Next + `public/sw.js` propio registrado por `SWRegister.tsx`. **No usar `next-pwa`** (no está mantenido y no es compatible con Next 16/Turbopack). Estrategia: cache-first para el app shell y estáticos, network-first para `/api/*`, y la última recomendación se guarda en `localStorage`/IndexedDB.
+- **PWA:** `app/manifest.ts` nativo de Next + `public/sw.js` propio registrado por `SWRegister.tsx`. **No usar** `next-pwa` (no está mantenido y no es compatible con Next 16/Turbopack). Estrategia: cache-first para el app shell y estáticos, network-first para `/api/`*, y la última recomendación se guarda en `localStorage`/IndexedDB.
 - Idioma: español (`<html lang="es">`).
 
 ---
@@ -383,6 +400,7 @@ Notas:
 ## 10. Configuración y entornos
 
 `.env.example` (se copia a `.env`; `.env` no se sube a git):
+
 ```
 POSTGRES_USER=admin
 POSTGRES_PASSWORD=password
