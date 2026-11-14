@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# El .gitignore raíz ignora 'lib/' (plantilla de Python); aquí sí la necesitamos
+!src/lib/
