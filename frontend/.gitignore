@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# El .gitignore raíz ignora 'lib/' (plantilla de Python); aquí sí la necesitamos
+!app/lib/
