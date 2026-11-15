@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from app.schemas.analysis import AnalysisRequest
+from app.schemas.analysis import AnalysisRequest, ClimateShift
 from app.services import recommender
 from tests.conftest import crop, make_climate
 
@@ -226,3 +226,73 @@ def test_razon_de_cultivo_popular_en_el_pais(climate, catalog):
     areas = {c.id: 1_000_000 for c in catalog}
     result = recommender.recommend(climate, catalog, req(), today=NOV, country_areas=areas, country_name="México")
     assert any("más sembrados en México" in r for s in result.rotation for r in s.reasons)
+
+
+# ---------------------------------------------------------------- estrategias (v2.2)
+
+
+def test_estrategias_incluyen_la_actual_y_al_menos_tres(climate, catalog):
+    r = recommender.recommend(climate, catalog, req(), NOV)
+    assert r.strategies[0].is_current and r.strategies[0].id == "current"
+    assert len(r.strategies) >= 3, "el reto pide comparar al menos 3, incluida la actual"
+    recomendadas = [s for s in r.strategies if s.is_recommended]
+    assert len(recomendadas) == 1 and recomendadas[0].id == "water"
+    assert [p.crop_id for p in recomendadas[0].steps] == [p.crop_id for p in r.rotation]
+    assert all(len(s.steps) == 3 and s.why and s.benefits for s in r.strategies)
+
+
+def test_estrategia_actual_coincide_con_el_impacto(climate, catalog):
+    r = recommender.recommend(climate, catalog, req(), NOV)
+    actual = r.strategies[0]
+    agua, riego, nitrogeno = (i.current for i in r.impact)
+    assert (actual.water_mm, actual.irrigation_mm, actual.nitrogen_kg_ha) == (agua, riego, nitrogeno)
+    assert actual.soil_health == r.soil_health.current
+    assert {p.crop_id for p in actual.steps} <= {"maize", "fallow"}  # monocultivo o descanso
+    assert actual.bare_seasons == sum(p.crop_id == "fallow" for p in actual.steps)
+
+
+def test_seguir_como_hoy_descansa_donde_el_cultivo_no_aguanta(catalog):
+    # Trigo en un verano de 30 °C (su máximo absoluto es 33): no tolera → descanso en esa temporada
+    calido = make_climate()
+    calido = calido.__class__(
+        summary=calido.summary.model_copy(update={"monthly": [
+            p.model_copy(update={"temp_c": 34.0, "temp_min_c": 26.0, "temp_max_c": 42.0}) if p.month in (6, 7, 8) else p
+            for p in calido.summary.monthly]}),
+        recent=calido.recent)
+    r = recommender.recommend(calido, catalog, req(current="wheat"), NOV)
+    actual = r.strategies[0]
+    verano = next(p for p in actual.steps if p.season == "summer")
+    assert verano.crop_id == "fallow" and actual.bare_seasons >= 1
+    assert any("sin cultivo" in t for t in actual.tradeoffs)
+
+
+def test_estrategias_repetidas_se_fusionan(climate, catalog):
+    r = recommender.recommend(climate, catalog, req(), NOV)
+    rotaciones = [tuple(p.crop_id for p in s.steps) for s in r.strategies]
+    assert len(rotaciones) == len(set(rotaciones))
+    titulos = " · ".join(s.title for s in r.strategies)
+    for titulo in recommender.STRATEGY_TITLE.values():
+        assert titulo in titulos, "fusionar no debe perder ninguna prioridad"
+
+
+def test_la_prioridad_elegida_sale_primero_tras_la_actual(climate, catalog):
+    r = recommender.recommend(climate, catalog, req(priority="nitrogen"), NOV)
+    assert r.strategies[1].id == "nitrogen" and r.strategies[1].is_recommended
+
+
+def test_escenario_mas_caliente_y_seco_cambia_el_clima(climate, catalog):
+    base = recommender.recommend(climate, catalog, req(), NOV)
+    escenario = req().model_copy(update={"climate_shift": ClimateShift(rain_pct=-40, temp_c=3)})
+    seco = recommender.recommend(climate, catalog, escenario, NOV)
+    assert seco.climate[6].temp == pytest.approx(base.climate[6].temp + 3)
+    assert seco.climate[0].rain < base.climate[0].rain
+    assert "escenario hipotético" in seco.uncertainty.reason
+    assert climate.summary.monthly[6].temp_c == 21, "el clima original no se modifica"
+
+
+def test_escenario_neutro_no_cambia_nada(climate, catalog):
+    base = recommender.recommend(climate, catalog, req(), NOV)
+    neutro = recommender.recommend(
+        climate, catalog, req().model_copy(update={"climate_shift": ClimateShift()}), NOV)
+    assert [p.crop_id for p in neutro.rotation] == [p.crop_id for p in base.rotation]
+    assert neutro.climate == base.climate

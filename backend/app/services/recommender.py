@@ -12,6 +12,7 @@ Fuentes de las reglas (docs/INVESTIGACION-CULTIVOS.md):
 """
 
 import calendar
+import dataclasses
 import math
 from dataclasses import dataclass, field
 from datetime import date
@@ -19,10 +20,12 @@ from datetime import date
 from app.schemas.analysis import (
     FALLOW_ID,
     AnalysisRequest,
+    ClimateShift,
     DetectedSoil,
     ImpactItem,
     MonthlyClimate,
     NasaMetric,
+    Priority,
     RotationStep,
     Season,
     SoilHealth,
@@ -60,6 +63,17 @@ EFFECTIVE_RAIN = 0.8  # fracción de la lluvia que aprovecha el cultivo (simplif
 PH_TOLERANCE = 0.5  # fuera del óptimo de ECOCROP ± 0.5 → penaliza
 MIN_COUNTRY_AREA_HA = 10_000  # se recomienda un cultivo solo si en el país se cosechan ≥ 10 000 ha al año (FAOSTAT)
 TOP_CROPS_IN_COUNTRY = 5  # "uno de los cultivos más sembrados del país"
+
+PRIORITIES: tuple[Priority, ...] = ("water", "nitrogen", "yield")
+STRATEGY_TITLE = {"current": "Seguir como hoy", "water": "Ahorrar agua", "nitrogen": "Regenerar el suelo",
+                  "yield": "Más rendimiento"}
+STRATEGY_WHY = {
+    "current": "Tu cultivo actual en las temporadas en que el clima lo permite; descanso en las demás.",
+    "water": "En cada temporada elige lo que menos agua necesita entre lo que el clima permite.",
+    "nitrogen": "Da más peso a leguminosas y coberturas, que devuelven nitrógeno y protegen el suelo.",
+    "yield": "Da más peso a los cultivos de mayor valor productivo que el clima permite.",
+}
+MAX_TRADEOFFS = 4
 
 
 @dataclass(frozen=True)
@@ -500,27 +514,28 @@ def uncertainty_for(data: ClimateData) -> Uncertainty:
     return Uncertainty(level=levels[i], reason=reason)
 
 
-# ---------------------------------------------------------------- función principal
+def apply_shift(data: ClimateData, shift: ClimateShift | None) -> ClimateData:
+    """Escenario «¿y si…?»: cambia la lluvia (%) y suma °C al clima histórico de cada mes. No toca el original.
+    Lo reciente (90 días) no se toca: el escenario es sobre las temporadas típicas."""
+    if shift is None or (shift.rain_pct == 0 and shift.temp_c == 0):
+        return data
+    f, d = 1 + shift.rain_pct / 100, shift.temp_c
+    s = data.summary
+    monthly = [p.model_copy(update={"temp_c": p.temp_c + d, "temp_max_c": p.temp_max_c + d,
+                                    "temp_min_c": p.temp_min_c + d, "rain_mm": p.rain_mm * f}) for p in s.monthly]
+    summary = s.model_copy(update={"monthly": monthly, "temp_mean_c": s.temp_mean_c + d,
+                                   "rain_annual_mm": s.rain_annual_mm * f})
+    return dataclasses.replace(data, summary=summary)
 
 
-def recommend(data: ClimateData, crops: list[CropParams], req: AnalysisRequest, today: date,
-              detected_soil: DetectedSoil | None = None, country_areas: dict[str, float] | None = None,
-              country_name: str | None = None) -> RecommendationResult:
-    """`country_areas` = {crop_id: ha cosechadas al año} del país de la parcela (FAOSTAT). Solo se recomiendan
-    cultivos que ahí se siembran; el cultivo actual del usuario puede ser cualquiera del catálogo."""
-    by_id = {c.id: c for c in crops}
-    current = by_id[req.current_crop]  # el router ya validó que existe
-    candidates = grown_in_country(crops, country_areas)
-    popular = top_in_country(country_areas)
-    uncertainty = uncertainty_for(data)
-    # Lo que dijo el usuario manda; lo que falte se completa con SoilGrids
-    soil = SoilInput(
-        texture=req.soil.texture if req.soil else (detected_soil.texture if detected_soil else None),
-        ph=(req.soil.ph if req.soil and req.soil.ph is not None else (detected_soil.ph if detected_soil else None)),
-    )
+# ---------------------------------------------------------------- rotaciones y estrategias
+
+
+def build_rotation(candidates: list[CropParams], seasons: list[SeasonClimate], req: AnalysisRequest,
+                   current: CropParams, soil: SoilInput, uncertainty: Uncertainty, country_name: str | None,
+                   popular: set[str]) -> tuple[list[RotationStep], list[CropParams | None]]:
+    """Rotación de 3 temporadas para la prioridad de `req`. Devuelve (pasos, cultivo de cada paso o None)."""
     irrigated = bool(req.irrigated)
-
-    seasons = [season_climate(s, data) for s in next_seasons(today, data.summary.lat)]
     rotation: list[RotationStep] = []
     chosen: list[CropParams | None] = []
     previous = current
@@ -543,13 +558,138 @@ def recommend(data: ClimateData, crops: list[CropParams], req: AnalysisRequest, 
         ))
         chosen.append(best.crop)
         previous = best.crop
+    return rotation, chosen
 
-    # "Seguir igual": el cultivo actual en las temporadas donde puede crecer y descanso en las demás
-    # (p. ej. trigo en Mexicali: invierno sí, verano no). Así el impacto compara contra algo realista.
-    baseline: list[CropParams | None] = [current if tolerates(current, sc) else None for sc in seasons]
-    water_cur, irr_cur, n_cur = impact(baseline, seasons)
-    water_rec, irr_rec, n_rec = impact(chosen, seasons)
+
+def current_steps(current: CropParams, candidates: list[CropParams], seasons: list[SeasonClimate],
+                  req: AnalysisRequest, soil: SoilInput, uncertainty: Uncertainty) -> list[RotationStep]:
+    """Pasos de «Seguir como hoy»: el mismo cultivo en cada temporada que lo tolera (monocultivo)."""
+    steps: list[RotationStep] = []
+    for sc in seasons:
+        label = SEASON_LABEL[sc.season]
+        if not tolerates(current, sc):
+            steps.append(RotationStep(
+                season=sc.season, crop_id=FALLOW_ID, score=0, water_saving_pct=0, nitrogen_delta=0, risks=[],
+                reasons=[f"El {current.name.lower()} no tolera el {label} de este lugar",
+                         "Hoy la parcela queda sin cultivo en esta temporada"],
+                planting_window="—", irrigation_mm=0))
+            continue
+        c = evaluate(current, sc, req, current, season_context([*candidates, current], sc), soil, current)
+        steps.append(RotationStep(
+            season=sc.season, crop_id=current.id, score=c.score,
+            reasons=["Es lo que siembras hoy", *reasons_for(c, sc, current, current, req)[:2]],
+            water_saving_pct=0, nitrogen_delta=current.nitrogen_delta_kg_ha,
+            risks=risks_for(c, sc, uncertainty.level == "high", not c.in_season, bool(req.irrigated), soil),
+            planting_window=planting_window(sc.months), irrigation_mm=round(c.irrigation_mm)))
+    return steps
+
+
+def describe(sid: str, steps: list[RotationStep], seq: list[CropParams | None], seasons: list[SeasonClimate],
+             base: tuple[float, float, float, int], organic_matter: str | None, priority: Priority) -> Strategy:
+    """Números y textos de una estrategia. `base` = (agua, riego, nitrógeno, suelo) de «Seguir como hoy»."""
+    water, irrigation, nitrogen = impact(seq, seasons)
+    soil_h = soil_health_index(seq, organic_matter)
+    bare = sum(c is None for c in seq)
+    b_water, b_irr, b_n, b_soil = base
+    benefits: list[str] = []
+    tradeoffs: list[str] = []
+    if sid == "current":
+        benefits.append("Ya conoces el cultivo, tienes el equipo y sabes dónde venderlo")
+    else:
+        if irrigation < b_irr:
+            benefits.append(f"{b_irr - irrigation:.0f} mm menos de riego que seguir como hoy")
+        if nitrogen > b_n:
+            benefits.append(f"{nitrogen - b_n:+.0f} kg/ha de nitrógeno en el suelo (estimado)")
+        if soil_h > b_soil:
+            benefits.append(f"Salud del suelo de {b_soil} a {soil_h} / 100 (estimado)")
+        if water > b_water:
+            tradeoffs.append(f"Usa {water - b_water:.0f} mm más de agua en total: hay más temporadas con cultivo")
+    # Misma regla que la rotación y el índice de suelo: se comparan cultivos consecutivos (el barbecho no cuenta)
+    families = [family_of(c) for c in seq if c is not None]
+    repeats = any(a == b for a, b in zip(families, families[1:]))
+    if repeats:
+        tradeoffs.append("Repite familia botánica: plagas y enfermedades se acumulan")
+    elif len(families) >= 2:
+        benefits.append("Cada temporada cambia de familia botánica: corta ciclos de plagas")
+    if bare:
+        tradeoffs.append(f"{bare} temporada(s) sin cultivo: deja rastrojo o una cobertura para evitar erosión")
+    seen = {t.split(":")[0] for t in tradeoffs}
+    for risk in (r for s in steps for r in s.risks):
+        key = risk.split(":")[0]  # «Requiere riego: …7 %» y «…1 %» son el mismo aviso
+        if key in seen or (repeats and risk.startswith("Misma familia")) or len(tradeoffs) >= MAX_TRADEOFFS:
+            continue
+        seen.add(key)
+        tradeoffs.append(risk)
+    evidence = [
+        f"{c.name}, {SEASON_LABEL[sc.season]}: necesita ~{water_need(c, sc):.0f} mm y la lluvia aporta "
+        f"~{cycle_rain(c, sc):.0f} mm (FAO-56 con clima de NASA POWER)"
+        for c, sc in zip(seq, seasons) if c is not None
+    ]
+    return Strategy(
+        id=sid, title=STRATEGY_TITLE[sid], is_current=sid == "current", is_recommended=sid == priority,
+        steps=steps, water_mm=water, irrigation_mm=irrigation, nitrogen_kg_ha=nitrogen, soil_health=soil_h,
+        bare_seasons=bare, why=STRATEGY_WHY[sid],
+        benefits=benefits or ["Resultados parecidos a seguir como hoy"], tradeoffs=tradeoffs, evidence=evidence,
+    )
+
+
+def merge_duplicates(strategies: list[Strategy]) -> list[Strategy]:
+    """Si dos prioridades dan los mismos cultivos, se muestran como una sola («Ahorrar agua · Regenerar el suelo»)."""
+    out: list[Strategy] = []
+    for s in strategies:
+        twin = next((o for o in out if [x.crop_id for x in o.steps] == [x.crop_id for x in s.steps]), None)
+        if twin is None:
+            out.append(s)
+        else:
+            twin.title = f"{twin.title} · {s.title}"
+            twin.is_recommended = twin.is_recommended or s.is_recommended
+    return out
+
+
+# ---------------------------------------------------------------- función principal
+
+
+def recommend(data: ClimateData, crops: list[CropParams], req: AnalysisRequest, today: date,
+              detected_soil: DetectedSoil | None = None, country_areas: dict[str, float] | None = None,
+              country_name: str | None = None) -> RecommendationResult:
+    """`country_areas` = {crop_id: ha cosechadas al año} del país de la parcela (FAOSTAT). Solo se recomiendan
+    cultivos que ahí se siembran; el cultivo actual del usuario puede ser cualquiera del catálogo."""
+    by_id = {c.id: c for c in crops}
+    current = by_id[req.current_crop]  # el router ya validó que existe
+    candidates = grown_in_country(crops, country_areas)
+    popular = top_in_country(country_areas)
+    uncertainty = uncertainty_for(data)
+    # Lo que dijo el usuario manda; lo que falte se completa con SoilGrids
+    soil = SoilInput(
+        texture=req.soil.texture if req.soil else (detected_soil.texture if detected_soil else None),
+        ph=(req.soil.ph if req.soil and req.soil.ph is not None else (detected_soil.ph if detected_soil else None)),
+    )
+    data = apply_shift(data, req.climate_shift)
+    if req.climate_shift is not None:
+        uncertainty = uncertainty.model_copy(update={"reason": uncertainty.reason + (
+            f"; escenario hipotético: lluvia {req.climate_shift.rain_pct:+.0f} %, "
+            f"temperatura {req.climate_shift.temp_c:+.1f} °C")})
+    seasons = [season_climate(s, data) for s in next_seasons(today, data.summary.lat)]
     organic_matter = req.soil.organic_matter if req.soil else None
+
+    # 1. «Seguir como hoy»: el cultivo actual en las temporadas donde puede crecer y descanso en las demás
+    #    (p. ej. trigo en Mexicali: invierno sí, verano no). Así el impacto compara contra algo realista.
+    baseline: list[CropParams | None] = [current if tolerates(current, sc) else None for sc in seasons]
+    base_numbers = (*impact(baseline, seasons), soil_health_index(baseline, organic_matter))
+    # 2. Una rotación por prioridad (priority_factor cambia el puntaje). La elegida va primero, así al fusionar
+    #    repetidas conserva su id.
+    order = [req.priority, *[p for p in PRIORITIES if p != req.priority]]
+    built = {p: build_rotation(candidates, seasons, req.model_copy(update={"priority": p}), current, soil,
+                               uncertainty, country_name, popular) for p in order}
+    rotation, chosen = built[req.priority]
+    strategies = merge_duplicates([
+        describe("current", current_steps(current, candidates, seasons, req, soil, uncertainty), baseline,
+                 seasons, base_numbers, organic_matter, req.priority),
+        *[describe(p, steps, seq, seasons, base_numbers, organic_matter, req.priority)
+          for p, (steps, seq) in built.items()],
+    ])
+    water_cur, irr_cur, n_cur, soil_cur = base_numbers
+    water_rec, irr_rec, n_rec = impact(chosen, seasons)
 
     return RecommendationResult(
         metrics=metrics_for(data, current),
@@ -561,9 +701,9 @@ def recommend(data: ClimateData, crops: list[CropParams], req: AnalysisRequest, 
             ImpactItem(label="Balance de nitrógeno (estimado)", unit="kg/ha", current=n_cur, recommended=n_rec,
                        better_when="higher"),
         ],
-        soil_health=SoilHealth(current=soil_health_index(baseline, organic_matter),
-                               recommended=soil_health_index(chosen, organic_matter)),
+        soil_health=SoilHealth(current=soil_cur, recommended=soil_health_index(chosen, organic_matter)),
         climate=[MonthlyClimate(month=MONTH_ABBR[p.month - 1], rain=round(p.rain_mm), temp=round(p.temp_c, 1))
                  for p in data.summary.monthly],
         uncertainty=uncertainty,
+        strategies=strategies,
     )

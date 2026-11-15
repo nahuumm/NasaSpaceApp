@@ -302,3 +302,32 @@ def test_parcela_gigante_da_422(monkeypatch, catalog):
     r = client.post("/api/v1/analyses", json={**BODY, "geometry": {"type": "Polygon", "coordinates": gigante}})
     assert r.status_code == 422
     assert "muy grande" in r.json()["detail"]
+
+
+def test_analisis_trae_estrategias(monkeypatch, catalog):
+    falsear(monkeypatch, catalog)
+    r = client.post("/api/v1/analyses?guardar=false", json=BODY)
+    assert r.status_code == 200
+    estrategias = r.json()["strategies"]
+    assert len(estrategias) >= 3 and estrategias[0]["id"] == "current"
+    assert {"isRecommended", "waterMm", "bareSeasons", "evidence"} <= estrategias[0].keys()
+    assert r.json()["climateShift"] is None
+
+
+def test_escenario_con_guardar_da_422(monkeypatch, catalog):
+    falsear(monkeypatch, catalog)
+    r = client.post("/api/v1/analyses", json={**BODY, "climateShift": {"rainPct": -20, "tempC": 1}})
+    assert r.status_code == 422
+
+
+def test_escenario_fuera_de_rango_da_422(monkeypatch, catalog):
+    falsear(monkeypatch, catalog)
+    r = client.post("/api/v1/analyses?guardar=false", json={**BODY, "climateShift": {"rainPct": -90, "tempC": 0}})
+    assert r.status_code == 422
+
+
+def test_escenario_sin_guardar_responde_estrategias(monkeypatch, catalog):
+    falsear(monkeypatch, catalog)
+    r = client.post("/api/v1/analyses?guardar=false", json={**BODY, "climateShift": {"rainPct": -20, "tempC": 1}})
+    assert r.status_code == 200
+    assert len(r.json()["strategies"]) >= 3 and r.json()["climateShift"]["rainPct"] == -20
