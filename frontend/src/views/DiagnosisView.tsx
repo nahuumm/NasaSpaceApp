@@ -134,7 +134,7 @@ export default function DiagnosisView() {
           <div className="mt-3 h-[240px]">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={analysis.climate}>
-                <CartesianGrid stroke="#E6DFCF" vertical={false} />
+                <CartesianGrid stroke="var(--color-line-soft)" vertical={false} />
                 <XAxis dataKey="month" tickLine={false} axisLine={false} />
                 <YAxis yAxisId="l" tickLine={false} axisLine={false} unit=" mm" />
                 <YAxis yAxisId="r" orientation="right" tickLine={false} axisLine={false} unit="°" />

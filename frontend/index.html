@@ -1,6 +1,13 @@
 <!doctype html>
 <html lang="es">
   <head>
+    <script>
+  try {
+    var t = localStorage.getItem('fieldshift:tema');
+    if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

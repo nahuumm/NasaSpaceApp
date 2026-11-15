@@ -71,3 +71,55 @@ body {
   from { left: 0; }
   to { left: 100%; }
 }
+
+:root { color-scheme: light; }
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-canvas: #0E1813;
+  --color-canvas-subtle: #121F19;
+  --color-surface-raised: #17271F;
+  --color-surface-sunken: #0B130F;
+
+  --color-ink-900: #EAF1EC;
+  --color-ink-700: #C5D2C9;
+  --color-ink-500: #93A399;
+  --color-ink-400: #6F8077;
+
+  --color-line-soft: #21382D;
+  --color-line: #2D4A3C;
+  --color-line-strong: #3E6350;
+
+  --color-leaf-50: #15291D;
+  --color-leaf-100: #1D3D28;
+  --color-leaf-300: #5E9A4E;
+  --color-leaf-500: #5DAF47;
+  --color-leaf-600: #3F7D4A;
+  --color-leaf-700: #4A9A55;
+  --color-leaf-900: #D4EDD7;
+
+  --color-clay-100: #33261B;
+  --color-clay-300: #A87B53;
+  --color-clay-500: #D9A97E;
+  --color-clay-700: #E8C3A0;
+
+  --color-sky-50: #12293A;
+  --color-sky-300: #4F9CCB;
+  --color-sky-500: #4DB0EE;
+  --color-sky-700: #8CCBF2;
+
+  --color-sun-100: #3A2F12;
+  --color-sun-300: #C99B33;
+  --color-sun-500: #F5B13C;
+  --color-sun-700: #F2C46B;
+
+  --color-moist: #3CC0BA;
+  --color-nitro: #A58AE6;
+  --color-ok: #3FBF74;
+  --color-warn: #F0B43A;
+  --color-danger: #EF6B6B;
+
+  --shadow-card: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  --shadow-lift: 0 2px 4px rgba(0,0,0,.45), 0 18px 40px -16px rgba(0,0,0,.7);
+}
