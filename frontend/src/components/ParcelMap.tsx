@@ -149,7 +149,8 @@ export default function ParcelMap() {
         )}
       </MapContainer>
 
-      <div className="absolute left-3 top-3 z-[1000] flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-2">
+      {/* En lg+ se descuenta el ancho del panel lateral (360/400 px + márgenes) para no quedar debajo de él */}
+      <div className="absolute left-3 top-3 z-[1000] flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-2 lg:max-w-[calc(100%-360px-2.75rem)] xl:max-w-[calc(100%-400px-2.75rem)]">
         <DrawToolbar
           herramienta={herramienta} onHerramienta={cambiarHerramienta}
           editando={editando} onEditando={(v) => { setEditando(v); if (!v) setBorrarPunto(false); }}
@@ -162,7 +163,8 @@ export default function ParcelMap() {
       </div>
 
       {geometry && areaHa && (
-        <div className="absolute bottom-6 left-4 z-[1000] rounded-lg bg-orbit/80 px-3 py-1.5 font-mono text-xs text-paper">
+        // En celular quedaría bajo el panel, que ya muestra las hectáreas.
+        <div className="absolute bottom-6 left-4 z-[1000] hidden rounded-lg lg:block bg-orbit/80 px-3 py-1.5 font-mono text-xs text-paper">
           {areaHa.toFixed(1)} ha
         </div>
       )}
