@@ -33,7 +33,7 @@ explicando razones, riesgos, impacto estimado e incertidumbre.
 ### Fuera del MVP (solo si sobra tiempo)
 - NDVI real (MODIS/VIIRS/Sentinel-2), SMAP, GPM IMERG: requieren cuenta Earthdata y procesar rasters.
 - Rendimiento estimado (t/ha): no hay fuente confiable sin un modelo de cultivo.
-- Autenticación, parcelas guardadas con nombre.
+- Autenticación real y parcelas guardadas con nombre. (El frontend incluye un perfil local sin servidor: nombre, correo y granja guardados en el navegador.)
 - Fuentes solo de EE. UU. (SSURGO, CropScape, PRISM…): no cubren la zona de demo (Baja California).
 
 ---
