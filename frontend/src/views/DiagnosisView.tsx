@@ -1,14 +1,20 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ChevronDown } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Download } from 'lucide-react';
 import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { useStore } from '../store/useStore';
 import { cropName, SEASON_BG, SEASON_LABEL } from '../lib/crops';
 import NasaMetricCard from '../components/NasaMetricCard';
 import GaugeSoilHealth from '../components/GaugeSoilHealth';
 import ImpactBar from '../components/ImpactBar';
+import { exportarPlanPdf } from '../lib/pdf';
+import { PRIORITY_LABEL } from '../lib/etiquetas';
 
-const PRIORITY_LABEL = { water: 'Ahorrar agua', nitrogen: 'Regenerar nitrógeno', yield: 'Maximizar rendimiento' } as const;
+const INCERTIDUMBRE = {
+  low: { texto: 'baja', clase: 'bg-leaf-50 text-leaf-900' },
+  medium: { texto: 'media', clase: 'bg-sun-100 text-ink-900' },
+  high: { texto: 'alta', clase: 'bg-clay-100 text-ink-900' },
+} as const;
 
 export default function DiagnosisView() {
   const { analysis, crop, priority, backToSelect } = useStore();
@@ -26,6 +32,10 @@ export default function DiagnosisView() {
         <span className="rounded-full bg-leaf-50 px-3 py-1 text-xs text-leaf-900">{analysis.areaHa.toFixed(1)} ha</span>
         {crop && <span className="rounded-full bg-leaf-50 px-3 py-1 text-xs text-leaf-900">{cropName(crop)}</span>}
         {priority && <span className="rounded-full bg-sky-50 px-3 py-1 text-xs text-sky-700">{PRIORITY_LABEL[priority]}</span>}
+        <button onClick={() => exportarPlanPdf(analysis, { crop, priority })}
+          className="ml-auto flex items-center gap-1.5 rounded-full bg-leaf-600 px-4 py-1.5 text-sm font-medium text-paper hover:bg-leaf-700">
+          <Download size={16} /> Exportar PDF
+        </button>
       </header>
 
       <motion.section className="bg-orbit px-6 py-6" initial={{ y: -24, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
@@ -42,6 +52,10 @@ export default function DiagnosisView() {
           ))}
         </motion.div>
       </motion.section>
+
+      <p role="note" className={`mx-6 mt-6 rounded-xl px-4 py-3 text-sm ${INCERTIDUMBRE[analysis.uncertainty.level].clase}`}>
+        <strong>Incertidumbre {INCERTIDUMBRE[analysis.uncertainty.level].texto}.</strong> {analysis.uncertainty.reason}.
+      </p>
 
       <div className="grid gap-6 p-6 lg:grid-cols-5">
         <section className="lg:col-span-3">
