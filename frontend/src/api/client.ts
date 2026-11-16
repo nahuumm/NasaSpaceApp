@@ -1,6 +1,7 @@
 // Cliente único de la API: los componentes NO hacen fetch directo. Ver docs/ARQUITECTURA.md §5 y §9.
 import type { AnalysisRequest, AnalysisResponse, AnalysisSummary, DetectedSoil } from './types';
 import { mockAnalysis, mockHistory } from './mock';
+import { getDeviceId } from '../lib/deviceId';
 
 const BASE = import.meta.env.VITE_API_URL as string | undefined;
 // Si no hay API configurada (VITE_API_URL vacío) o VITE_USE_MOCK=true, usa datos de ejemplo.
@@ -20,7 +21,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(`${BASE}${path}`, {
       ...init,
-      headers: { 'Content-Type': 'application/json', ...init?.headers },
+      headers: { 'Content-Type': 'application/json', 'X-Device-Id': getDeviceId(), ...init?.headers },
     });
   } catch {
     throw new Error('No se pudo conectar con el servidor.');
