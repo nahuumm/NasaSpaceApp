@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { lazy, Suspense, type ComponentType } from 'react';
 import { useStore, type ViewId } from './store/useStore';
 import AppShell from './components/AppShell';
+import AvisoError from './components/AvisoError';
 // SelectView es la vista inicial: se carga de inmediato. El resto se descarga al abrirse.
 import SelectView from './views/SelectView';
 const DiagnosisView = lazy(() => import('./views/DiagnosisView'));
@@ -29,9 +30,12 @@ export default function App() {
       <AnimatePresence mode="wait">
         <motion.main key={view} className="h-full" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
           exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
-          <Suspense fallback={null}>
-            <View />
-          </Suspense>
+          {/* key={view} en motion.main: al cambiar de vista el aviso de error se reinicia solo */}
+          <AvisoError>
+            <Suspense fallback={null}>
+              <View />
+            </Suspense>
+          </AvisoError>
         </motion.main>
       </AnimatePresence>
     </AppShell>
